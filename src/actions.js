@@ -20,7 +20,7 @@ import {
 import { authErrorHandler } from "openstack-uicore-foundation/lib/utils/actions";
 import Swal from 'sweetalert2';
 import { PaymentProviderFactory } from "./utils/payment-providers/payment-provider-factory";
-import { isFreeOrder, isPrePaidOrder } from './utils/utils';
+import { hasDiscountApplied, isFreeOrder, isPrePaidOrder } from './utils/utils';
 import { STEP_PAYMENT, STEP_PERSONAL_INFO } from './utils/constants';
 
 import URI from 'urijs';
@@ -141,11 +141,26 @@ export const getTicketTypesAndTaxes = (summitId) => async (dispatch) => {
     })
 };
 
+// Which ticket types a promo code changed. One the catalog did not offer before
+// the code was applied was unlocked by it, and a discount is whatever the API
+// marked, so the API stays the authority on both. Answering here is what lets
+// the answer reach the store in the same update as the catalog it describes,
+// with nothing to hold onto in between.
+//
+// No `before` means this fetch was not an apply, so the code changed nothing.
+const affectedTicketTypeIds = (before, after = []) => {
+    if (!before?.length) return [];
+    const offered = new Set(before.map(t => t.id));
+    return after
+        .filter(t => !offered.has(t.id) || hasDiscountApplied(t))
+        .map(t => t.id);
+};
+
 /**
  * @param summitId
  * @returns {(function(*, *, {apiBaseUrl: *, getAccessToken: *}): Promise<*|undefined>)|*}
  */
-const getTicketTypes = (summitId) => async (dispatch, getState, { apiBaseUrl, getAccessToken }) => {
+const getTicketTypes = (summitId, { comparedTo = null } = {}) => async (dispatch, getState, { apiBaseUrl, getAccessToken }) => {
     try {
         const accessToken = await getAccessToken();
         // try to get the current promo code
@@ -163,7 +178,10 @@ const getTicketTypes = (summitId) => async (dispatch, getState, { apiBaseUrl, ge
 
         return getRequest(
             createAction(REQUESTED_TICKET_TYPES),
-            createAction(GET_TICKET_TYPES),
+            (payload) => createAction(GET_TICKET_TYPES)({
+                ...payload,
+                ticketTypesAffectedByPromoCode: affectedTicketTypeIds(comparedTo, payload.response?.data),
+            }),
             `${apiBaseUrl}/api/v1/summits/${summitId}/ticket-types/allowed`,
             customErrorHandler
         )(params)(dispatch).then((res) => {
@@ -207,10 +225,12 @@ const getTaxesTypes = (summitId) => async (dispatch, getState, { apiBaseUrl, get
 }
 
 export const applyPromoCode = (currentPromoCode) => async (dispatch, getState) => {
-    const { registrationLiteState: { settings: { summitId } } } = getState();
+    const { registrationLiteState: { settings: { summitId }, ticketTypes } } = getState();
     try {
         dispatch(createAction(SET_CURRENT_PROMO_CODE)({ currentPromoCode }));
-        await dispatch(getTicketTypes(summitId));
+        // The catalog as it stands now is what the refreshed one is judged
+        // against, which is how a code that reveals a ticket is recognised.
+        await dispatch(getTicketTypes(summitId, { comparedTo: ticketTypes }));
     } catch (e) {
         dispatch(createAction(CLEAR_CURRENT_PROMO_CODE)({}));
         throw e;
@@ -222,7 +242,7 @@ export const removePromoCode = () => (dispatch, getState) => {
         const { registrationLiteState: { settings: { summitId } } } = getState();
         // clear the promo code and get the ticket types again
         dispatch(createAction(CLEAR_CURRENT_PROMO_CODE)({}));
-        dispatch(getTicketTypes(summitId));
+        return dispatch(getTicketTypes(summitId));
     } catch (e) {
         dispatch(createAction(CLEAR_CURRENT_PROMO_CODE)({}));
         return Promise.reject(e);

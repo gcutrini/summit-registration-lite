@@ -32,6 +32,10 @@ const usePromoCode = ({
     const [suggestionDismissed, setSuggestionDismissed] = useState(false);
     const [apiError, setApiError] = useState(null);
     const [applyingCode, setApplyingCode] = useState(false);
+    // Removing a code refetches the catalog without it. Until that lands the
+    // store still holds the code-filtered one, and applying against it would
+    // judge the next code against the last one's tickets.
+    const [removingCode, setRemovingCode] = useState(false);
     // In-flight flags belong to whoever awaits the request. Keeping this next
     // to applyingCode means every way a validation can end, including the
     // failures that never reach the reducer, clears it in one place.
@@ -70,7 +74,7 @@ const usePromoCode = ({
     // Something genuinely in flight: applying the code, validating it against
     // a ticket, or waiting on the code-filtered ticket list with no settled
     // answer to show in the meantime.
-    const isBusy = applyingCode || validatingCode
+    const isBusy = applyingCode || removingCode || validatingCode
         || (isApplied && promoCodeVerified == null && !ticketDataLoaded);
 
     // Settled rejection: the backend rejected the code for the selected
@@ -342,7 +346,7 @@ const usePromoCode = ({
         await revalidating;
     }, [applyPromoCode, onRevalidate, handleValidationError]);
 
-    const onRemove = useCallback(() => {
+    const onRemove = useCallback(async () => {
         if (isAutoApplied || isDiscoveredCode) setUserRemovedAutoApply(true);
 
         setIsAutoApplied(false);
@@ -352,8 +356,14 @@ const usePromoCode = ({
 
         setFormPromoCode('');
 
-        removePromoCode();
-    }, [isAutoApplied, isDiscoveredCode, discoveredPromoCode, removePromoCode, setFormPromoCode]);
+        setRemovingCode(true);
+        try {
+            await removePromoCode();
+        } finally {
+            setRemovingCode(false);
+        }
+    }, [isAutoApplied, isDiscoveredCode, discoveredPromoCode, removePromoCode,
+        setFormPromoCode, abandonValidation]);
 
     const onInputChange = useCallback((value) => {
         setApiError(null);

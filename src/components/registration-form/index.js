@@ -162,6 +162,7 @@ const RegistrationFormContent = (
         showCompanyInputDefaultOptions,
         companyDDLOptions2Show,
         promoCode,
+        ticketTypesAffectedByPromoCode,
         discoveredPromoCodes,
         hasDiscount,
         getTicketDiscount,
@@ -438,6 +439,7 @@ const RegistrationFormContent = (
 
                             <TicketTypeComponent
                                 allowedTicketTypes={allowedTicketTypes}
+                                ticketTypesAffectedByPromoCode={ticketTypesAffectedByPromoCode}
                                 originalTicketTypes={ticketTypes}
                                 inPersonDisclaimer={inPersonDisclaimer}
                                 taxTypes={taxTypes}
@@ -569,6 +571,7 @@ const mapStateToProps = ({ registrationLiteState }) => ({
     passwordlessCodeSent: registrationLiteState.passwordless.code_sent,
     passwordlessCodeError: registrationLiteState.passwordless.error,
     promoCode: registrationLiteState.promoCode,
+    ticketTypesAffectedByPromoCode: registrationLiteState.ticketTypesAffectedByPromoCode,
     discoveredPromoCodes: registrationLiteState.discoveredPromoCodes,
 })
 

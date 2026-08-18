@@ -53,6 +53,10 @@ const DEFAULT_STATE = {
         error: false
     },
     ticketTypes: [],
+    // Ticket type ids the applied promo code unlocked or discounted. Written
+    // with the catalog it describes and replaced by every fetch, so it needs no
+    // clearing: a fetch that is not an apply simply sets it empty.
+    ticketTypesAffectedByPromoCode: [],
     // added this flag to really know if we requested or not the ticket types collection
     // ( empty bc initial value or empty bc api empty response)
     requestedTicketTypes: false,
@@ -95,6 +99,7 @@ const RegistrationLiteReducer = (state = DEFAULT_STATE, action) => {
                 taxTypes: [],
                 invitation: null,
                 promoCode: '',
+                ticketTypesAffectedByPromoCode: [],
                 discoveredPromoCodes: [],
                 passwordless: { ...DEFAULT_STATE.passwordless },
                 settings: {
@@ -117,7 +122,12 @@ const RegistrationLiteReducer = (state = DEFAULT_STATE, action) => {
             return { ...state, step: payload }
         }
         case GET_TICKET_TYPES: {
-            return { ...state, ticketTypes: payload.response.data, requestedTicketTypes: true };
+            return {
+                ...state,
+                ticketTypes: payload.response.data,
+                ticketTypesAffectedByPromoCode: payload.ticketTypesAffectedByPromoCode || [],
+                requestedTicketTypes: true,
+            };
         }
         case GET_TAX_TYPES: {
             return { ...state, taxTypes: payload.response.data }

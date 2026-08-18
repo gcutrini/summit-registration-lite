@@ -29,6 +29,7 @@ import { VIEW_ITEM } from '../../utils/constants';
 
 const TicketTypeComponent = ({
     allowedTicketTypes,
+    ticketTypesAffectedByPromoCode = [],
     originalTicketTypes, // these are the original ones
     taxTypes,
     isActive,
@@ -85,22 +86,35 @@ const TicketTypeComponent = ({
         changeForm({ ticketType: ticket, ticketQuantity: quantity, ticketSelectionValid });
     }, [ticket, quantity, maxQuantity])
 
+    // Which ticket applying a code should select, or null to leave it to the
+    // user. Two kinds of code answer this differently: a discovered one names
+    // the tickets it applies to, so that list decides, while a typed one names
+    // nothing and what it changed in the catalog decides instead. Discovery
+    // runs for every logged in user, so reading the discovered code's list
+    // after a typed code was applied would pre-select for a code the user
+    // never applied and never look at what the typed one did.
+    //
+    // Only allowedTicketTypes is ever considered: it is date-filtered, and a
+    // ticket outside its sales window cannot be shown in the dropdown, so
+    // selecting one would strand the user on a ticket they cannot change.
+    const ticketToPreSelect = () => {
+        const changed = allowedTicketTypes.filter(
+            t => ticketTypesAffectedByPromoCode.includes(t.id));
+        const named = promoCode === promoState.suggestedCode
+            ? allowedTicketTypes.find(promoState.isCodeValidForTicket)
+            : (changed.length === 1 ? changed[0] : null);
+        return named || (allowedTicketTypes.length === 1 ? allowedTicketTypes[0] : null);
+    };
+
     useEffect(() => {
         // When promo code changes, the API returns updated ticket types with/without discount.
         // Sync the selected ticket with the refreshed data.
         if (!ticket) {
-            // Auto-select after a promo code is applied. Defer while applyingCode is
-            // true: the reducer sets promoCode synchronously before the refreshed
-            // ticketTypes land, so acting now would auto-select from a stale list.
-            // Once apply settles, prefer the first ticket the discovered code applies
-            // to (so per-ticket validation succeeds); fall back to the only ticket
-            // when there's a single option.
-            // Scan allowedTicketTypes (date-filtered) so we never auto-select
-            // a ticket the user couldn't have picked themselves from the dropdown.
+            // Defer while applyingCode is true: promoCode is set in the store
+            // before the refreshed ticketTypes land, so deciding now would read
+            // a stale catalog.
             if (promoCode && !promoState.applyingCode && allowedTicketTypes.length > 0) {
-                const isValid = promoState.isCodeValidForTicket;
-                const qualifying = isValid && allowedTicketTypes.find(isValid);
-                const toSelect = qualifying || (allowedTicketTypes.length === 1 ? allowedTicketTypes[0] : null);
+                const toSelect = ticketToPreSelect();
                 if (toSelect) handleTicketChange(toSelect);
             }
             return;
@@ -113,7 +127,8 @@ const TicketTypeComponent = ({
             setTicket(null);
             setQuantity(minQuantity);
         }
-    }, [promoCode, promoState.applyingCode, allowedTicketTypes, originalTicketTypes])
+    }, [promoCode, promoState.applyingCode, ticketTypesAffectedByPromoCode,
+        allowedTicketTypes, originalTicketTypes])
 
     const showTicketSelector = allowedTicketTypes.length > 0;
 

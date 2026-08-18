@@ -116,7 +116,9 @@ describe('abandoning an in-flight validation', () => {
         // is never.
         const { view } = await inFlight();
 
-        act(() => { view.result.current.actions.onRemove(); });
+        // Removing refetches the catalog without the code, and the field stays
+        // busy until that lands; this is about the state once it has.
+        await act(async () => { await view.result.current.actions.onRemove(); });
 
         expect(view.result.current.state.status).not.toBe(PROMO_STATUS.PROCESSING);
         expect(view.result.current.state.isReady).toBe(true);
