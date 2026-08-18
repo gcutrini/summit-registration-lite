@@ -11,7 +11,7 @@
  * limitations under the License.
  **/
 import RawHTML from 'openstack-uicore-foundation/lib/components/raw-html'
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useSpring, config, animated } from "react-spring";
 import { useMeasure } from "react-use";
 import T from 'i18n-react';
@@ -21,7 +21,7 @@ import { isInPersonTicketType } from "../../actions";
 import ReactTooltip from 'react-tooltip';
 import { formatCurrency } from '../../helpers';
 import { getTicketMaxQuantity } from '../../helpers';
-import { avoidTooltipOverflow, getTicketCost, getTicketTaxes, isPrePaidOrder } from '../../utils/utils';
+import { avoidTooltipOverflow, getTicketCost, getTicketTaxes, hasDiscountApplied, isPrePaidOrder } from '../../utils/utils';
 
 import PromoCodeInput from '../promocode-input';
 import TicketNotice from '../ticket-notice';
@@ -47,6 +47,11 @@ const TicketTypeComponent = ({
     const { state: promoState = {}, actions: promoActions = {} } = promo;
 
     const [ticket, setTicket] = useState(null);
+    // Which tickets were on offer just before a manually typed code was applied.
+    // Comparing that against the refreshed catalog is the only way to tell what
+    // such a code unlocked, since it carries no allowed_ticket_types of its own.
+    // Null whenever there is no manual apply to interpret.
+    const catalogBeforeApply = useRef(null);
     const [quantity, setQuantity] = useState(1);
 
     const minQuantity = 1;
@@ -85,26 +90,64 @@ const TicketTypeComponent = ({
         changeForm({ ticketType: ticket, ticketQuantity: quantity, ticketSelectionValid });
     }, [ticket, quantity, maxQuantity])
 
+    // The single ticket the applied code changed, or null when it changed none
+    // or several. A ticket missing from the pre-apply catalog was unlocked by
+    // the code, and a discount is whatever the API marked, so the API stays the
+    // authority on both.
+    //
+    // Reading clears the snapshot, and the caller reads on every settled apply
+    // whether or not it uses the answer, so one can never survive into a later
+    // apply it does not describe.
+    const ticketUnlockedOrDiscounted = () => {
+        const before = catalogBeforeApply.current;
+        catalogBeforeApply.current = null;
+        if (!before) return null;
+        const affected = allowedTicketTypes.filter(
+            t => !before.has(t.id) || hasDiscountApplied(t));
+        return affected.length === 1 ? affected[0] : null;
+    };
+
+    // Which ticket applying a code should select, or null to leave it to the
+    // user. Two kinds of code answer this differently: a discovered one names
+    // the tickets it applies to, so that list decides, while a typed one names
+    // nothing and what it changed in the catalog decides instead. Discovery
+    // runs for every logged in user, so reading the discovered code's list
+    // after a typed code was applied would pre-select for a code the user
+    // never applied and never look at what the typed one did.
+    //
+    // Only allowedTicketTypes is ever considered: it is date-filtered, and a
+    // ticket outside its sales window cannot be shown in the dropdown, so
+    // selecting one would strand the user on a ticket they cannot change.
+    const ticketToPreSelect = () => {
+        const affected = ticketUnlockedOrDiscounted();
+        const named = promoCode === promoState.suggestedCode
+            ? allowedTicketTypes.find(promoState.isCodeValidForTicket)
+            : affected;
+        return named || (allowedTicketTypes.length === 1 ? allowedTicketTypes[0] : null);
+    };
+
     useEffect(() => {
         // When promo code changes, the API returns updated ticket types with/without discount.
         // Sync the selected ticket with the refreshed data.
         if (!ticket) {
-            // Auto-select after a promo code is applied. Defer while applyingCode is
-            // true: the reducer sets promoCode synchronously before the refreshed
-            // ticketTypes land, so acting now would auto-select from a stale list.
-            // Once apply settles, prefer the first ticket the discovered code applies
-            // to (so per-ticket validation succeeds); fall back to the only ticket
-            // when there's a single option.
-            // Scan allowedTicketTypes (date-filtered) so we never auto-select
-            // a ticket the user couldn't have picked themselves from the dropdown.
+            // Defer while applyingCode is true: promoCode is set in the store
+            // before the refreshed ticketTypes land, so deciding now would read
+            // a stale catalog.
             if (promoCode && !promoState.applyingCode && allowedTicketTypes.length > 0) {
-                const isValid = promoState.isCodeValidForTicket;
-                const qualifying = isValid && allowedTicketTypes.find(isValid);
-                const toSelect = qualifying || (allowedTicketTypes.length === 1 ? allowedTicketTypes[0] : null);
+                const toSelect = ticketToPreSelect();
                 if (toSelect) handleTicketChange(toSelect);
+            } else if (!promoCode && !promoState.applyingCode) {
+                // An apply that failed, or a code since cleared, leaves nothing
+                // to interpret. Guarded on applyingCode because the code is
+                // still empty on the first render of an apply in flight.
+                catalogBeforeApply.current = null;
             }
             return;
         }
+        // The user has chosen; nothing here may move them. Drop the snapshot so
+        // it cannot pre-select later, once they clear that choice themselves.
+        catalogBeforeApply.current = null;
+
         const updatedCurrentTicket = originalTicketTypes.find(t => t?.id === ticket.id);
         if (updatedCurrentTicket) {
             changeForm({ ticketType: updatedCurrentTicket })
@@ -189,6 +232,8 @@ const TicketTypeComponent = ({
             setQuantity(minQuantity);
             targetTicket = null;
         }
+        catalogBeforeApply.current = new Set(allowedTicketTypes.map(t => t.id));
+
         await promoActions.onApply(code, targetTicket, quantity);
     }
 
